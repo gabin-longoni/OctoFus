@@ -174,7 +174,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(
         description="Protocol builder that creates protocol.pk from the decompiled sources"
     )
-    parser.add_argument("--sources-path", type=Path, default=Path("D:/code/bot/OctoFus/scripts/sources"))
+    parser.add_argument("--sources-path", type=Path, default=Path("D:/code/bot/OctoFus/resources/sources"))
     parser.add_argument("--octofus-path", type=Path, default=Path("D:/code/bot/OctoFus/sniffing/protocol"))
     # TODO: add filter for name
     args = parser.parse_args()
