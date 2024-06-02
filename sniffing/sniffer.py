@@ -12,19 +12,14 @@ from scapy.all import plist, conf, Raw, IP, PcapReader
 from scapy.data import ETH_P_ALL, MTU
 from scapy.consts import WINDOWS
 
-# Adjust the imports based on your project structure
 from sniffing.data.binrw import Buffer
 from sniffing.data.msg import Msg
+from sniffing.packet_parser import parse_packet
 
 logger = logging.getLogger("OctoFus-Sniffer")
 
-# Necessary on macOS if the folder of libdnet is not in
-# ctypes.macholib.dyld.DEFAULT_LIBRARY_FALLBACK
-# because the newer macOS do not allow to export
-# $DYLD_FALLBACK_LIBRARY_PATH with sudo
 if os.name == "posix" and sys.platform == "darwin":
     import ctypes.macholib.dyld
-
     ctypes.macholib.dyld.DEFAULT_LIBRARY_FALLBACK.insert(0, "/opt/local/lib")
 
 def sniff(
@@ -37,29 +32,6 @@ def sniff(
     *args,
     **kwargs
 ):
-    """Sniff packets
-    sniff([count=0,] [prn=None,] [store=1,] [offline=None,] [lfilter=None,] + L2ListenSocket args)
-    Modified version of scapy.all.sniff
-
-    store : bool
-        whether to store sniffed packets or discard them
-
-    prn : None or callable
-        function to apply to each packet. If something is returned,
-        it is displayed.
-        ex: prn = lambda x: x.summary()
-
-    lfilter : None or callable
-        function applied to each packet to determine
-        if further action may be done
-        ex: lfilter = lambda x: x.haslayer(Padding)
-
-    stop_event : None or Event
-        Event that stops the function when set
-
-    refresh : float
-        check stop_event.set() every `refresh` seconds
-    """
     logger.debug("Setting up sniffer...")
     if offline is None:
         L2socket = conf.L2listen
@@ -67,15 +39,12 @@ def sniff(
     else:
         s = PcapReader(offline)
 
-    # on Windows, it is not possible to select a L2socket
     if WINDOWS:
         from scapy.arch.pcapdnet import PcapTimeoutElapsed
-
         read_allowed_exceptions = (PcapTimeoutElapsed,)
 
         def _select(sockets):
             return sockets
-
     else:
         read_allowed_exceptions = ()
 
@@ -83,7 +52,6 @@ def sniff(
             try:
                 return select(sockets, [], [], refresh)[0]
             except OSError as exc:
-                # Catch 'Interrupted system call' errors
                 if exc.errno == errno.EINTR:
                     return []
                 raise
@@ -99,8 +67,6 @@ def sniff(
                 try:
                     p = s.recv(MTU)
                 except read_allowed_exceptions:
-                    # could add a sleep(refresh) if the CPU usage
-                    # is too much on windows
                     continue
                 if p is None:
                     break
@@ -121,14 +87,11 @@ def sniff(
     return plist.PacketList(lst, "Sniffed")
 
 def raw(pa):
-    """Raw data from a packet"""
     return pa.getlayer(Raw).load
 
 def get_local_ip():
-    """from https://stackoverflow.com/a/28950776/5133167"""
     s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     try:
-        # doesn't even have to be reachable
         s.connect(("10.255.255.255", 1))
         IP = s.getsockname()[0]
     except:
@@ -158,25 +121,17 @@ buf1 = Buffer()
 buf2 = Buffer()
 
 def on_receive(pa, action):
-    """Adds pa to the relevant buffer
-    Parse the messages from that buffer
-    Calls action on that buffer
-    """
     logger.debug("Received packet.")
     direction = from_client(pa)
     buf = buf1 if direction else buf2
     buf += raw(pa)
     msg = Msg.fromRaw(buf, direction)
     while msg:
-        action(msg)
+        result = parse_packet(msg.json())
+        action(result)
         msg = Msg.fromRaw(buf, direction)
 
 def start_sniffing(action, capture_file=None):
-    """Sniff in a new thread
-    When a packet is received, calls action
-    Returns a stop function
-    """
-
     logger.debug("Launching sniffer in thread...")
 
     def _sniff(stop_event):
